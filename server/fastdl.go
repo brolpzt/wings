@@ -31,16 +31,16 @@ func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
 		localPath += "/"
 	}
 
-	// The remote path uses the first 8 characters of the UUID (uuidShort),
-	// matching what the Panel displays as the FastDL URL path.
-	uuidShort := s.ID()
-	if len(uuidShort) > 8 {
-		uuidShort = uuidShort[:8]
-	}
-	remotePath := filepath.Join(req.RemotePath, uuidShort)
+	// The remote path uses the short UUID (first 8 chars) to match the FASTDL_URL
+	// variable injected by the Panel into the server's environment.
+	shortID := s.ID()[:8]
+	remotePath := filepath.Join(req.RemotePath, shortID)
 
-	// Build rsync arguments
-	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs"}
+	// Build rsync arguments.
+	// --chmod=ugo+rX  → make all synced files world-readable and dirs world-traversable
+	// --perms         → tell rsync to apply the --chmod rules (needed when the receiver
+	//                   is not the owner or when the source perms would otherwise win)
+	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs", "--chmod=ugo+rX", "--perms"}
 
 	if req.SyncPatterns != "" {
 		hasDirRule := false
