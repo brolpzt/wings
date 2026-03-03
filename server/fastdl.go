@@ -43,16 +43,34 @@ func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
 	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs"}
 
 	if req.SyncPatterns != "" {
-		// If patterns are provided, we only sync matching files.
-		// We must include all directories to allow traversing.
-		syncArgs = append(syncArgs, "--include=*/")
+		hasDirRule := false
+		patterns := strings.Split(req.SyncPatterns, ",")
+
+		// First, pass: check if there are any directory rules
+		for _, p := range patterns {
+			p = strings.TrimSpace(p)
+			if strings.HasSuffix(p, "/") || strings.HasPrefix(p, "/") {
+				hasDirRule = true
+				break
+			}
+		}
+
+		// If no directory rule was passed, default to all directories traversal
+		if !hasDirRule {
+			syncArgs = append(syncArgs, "--include=*/")
+		}
 
 		// Split by comma and add each pattern as an include
-		patterns := strings.Split(req.SyncPatterns, ",")
 		for _, p := range patterns {
 			p = strings.TrimSpace(p)
 			if p != "" {
-				syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
+				// If it's a directory rule, make sure we also traverse its subdirectories
+				if strings.HasSuffix(p, "/") {
+					syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
+					syncArgs = append(syncArgs, fmt.Sprintf("--include=%s**/", p))
+				} else {
+					syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
+				}
 			}
 		}
 
