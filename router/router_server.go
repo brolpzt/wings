@@ -159,6 +159,7 @@ func postServerFastDlSync(c *gin.Context) {
 	}
 
 	go func(s *server.Server, data server.FastDlSyncRequest) {
+		s.Log().Info("received manual trigger for FastDL synchronization")
 		if err := s.SyncFastDL(context.Background(), data); err != nil {
 			s.Log().WithField("error", err).Error("failed to execute FastDL synchronization")
 		}
