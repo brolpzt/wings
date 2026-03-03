@@ -167,6 +167,24 @@ func postServerFastDlSync(c *gin.Context) {
 	c.Status(http.StatusAccepted)
 }
 
+// postServerAddonExecute handles a request to execute an addon script (installation).
+func postServerAddonExecute(c *gin.Context) {
+	s := ExtractServer(c)
+
+	var data server.AddonExecuteRequest
+	if err := c.BindJSON(&data); err != nil {
+		return
+	}
+
+	go func(s *server.Server, data server.AddonExecuteRequest) {
+		if err := s.ExecuteAddon(context.Background(), data); err != nil {
+			s.Log().WithField("error", err).Error("failed to execute Addon script")
+		}
+	}(s, data)
+
+	c.Status(http.StatusAccepted)
+}
+
 // Performs a server installation in a background thread.
 func postServerInstall(c *gin.Context) {
 	s := ExtractServer(c)
