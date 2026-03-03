@@ -149,6 +149,24 @@ func postServerSync(c *gin.Context) {
 	}
 }
 
+// postServerFastDlSync handles a request to synchronize server files to a FastDL node.
+func postServerFastDlSync(c *gin.Context) {
+	s := ExtractServer(c)
+
+	var data server.FastDlSyncRequest
+	if err := c.BindJSON(&data); err != nil {
+		return
+	}
+
+	go func(s *server.Server, data server.FastDlSyncRequest) {
+		if err := s.SyncFastDL(context.Background(), data); err != nil {
+			s.Log().WithField("error", err).Error("failed to execute FastDL synchronization")
+		}
+	}(s, data)
+
+	c.Status(http.StatusAccepted)
+}
+
 // Performs a server installation in a background thread.
 func postServerInstall(c *gin.Context) {
 	s := ExtractServer(c)
