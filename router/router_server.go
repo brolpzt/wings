@@ -172,12 +172,16 @@ func postServerFastDlSync(c *gin.Context) {
 func postServerAddonExecute(c *gin.Context) {
 	s := ExtractServer(c)
 
+	s.Log().Info("received addon execution request from panel")
+
 	var data server.AddonExecuteRequest
 	if err := c.BindJSON(&data); err != nil {
+		s.Log().WithField("error", err).Error("failed to bind json for addon request")
 		return
 	}
 
 	go func(s *server.Server, data server.AddonExecuteRequest) {
+		s.Log().WithField("image", data.ContainerImage).Info("executing addon in background")
 		if err := s.ExecuteAddon(context.Background(), data); err != nil {
 			s.Log().WithField("error", err).Error("failed to execute Addon script")
 		}
