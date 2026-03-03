@@ -31,8 +31,13 @@ func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
 		localPath += "/"
 	}
 
-	// The remote path should include the server UUID to keep files isolated.
-	remotePath := filepath.Join(req.RemotePath, s.ID())
+	// The remote path uses the first 8 characters of the UUID (uuidShort),
+	// matching what the Panel displays as the FastDL URL path.
+	uuidShort := s.ID()
+	if len(uuidShort) > 8 {
+		uuidShort = uuidShort[:8]
+	}
+	remotePath := filepath.Join(req.RemotePath, uuidShort)
 
 	// Build rsync arguments
 	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs"}
