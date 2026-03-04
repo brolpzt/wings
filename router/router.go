@@ -82,6 +82,11 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
 		server.POST("/addon", postServerAddonExecute)
 		server.POST("/ws/deny", postServerDenyWSTokens)
 
+		// Firewall (IP ban) routes
+		server.POST("/firewall", postServerFirewallAdd)
+		server.DELETE("/firewall", deleteServerFirewallRule)
+		server.DELETE("/firewall/flush", deleteServerFirewallFlush)
+
 		// This archive request causes the archive to start being created
 		// this should only be triggered by the panel.
 		server.POST("/transfer", postServerTransfer)
