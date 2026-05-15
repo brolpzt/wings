@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	stderrors "errors"
 	"mime"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/gabriel-vasile/mimetype"
 )
@@ -34,9 +37,15 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 		return errors.WrapIf(err, "fastdl: failed to load S3 config")
 	}
 
+	usePathStyle := req.UsePathStyleEndpoint
+	if !usePathStyle && strings.Contains(strings.ToLower(req.Endpoint), "r2.cloudflarestorage.com") {
+		usePathStyle = true
+		s.Log().Debug("fastdl: auto-enabled path-style endpoint for Cloudflare R2")
+	}
+
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(strings.TrimRight(req.Endpoint, "/"))
-		o.UsePathStyle = req.UsePathStyleEndpoint
+		o.UsePathStyle = usePathStyle
 	})
 
 	shortID := s.ID()[:8]
@@ -108,6 +117,10 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 		return err
 	}
 
+	if len(localFiles) == 0 {
+		s.Log().Warn("fastdl: no local files matched sync patterns; nothing uploaded")
+	}
+
 	var toDelete []types.ObjectIdentifier
 	for _, key := range remoteKeys {
 		if _, ok := localFiles[key]; ok {
@@ -148,6 +161,10 @@ func (s *Server) listS3Keys(ctx context.Context, client *s3.Client, bucket, pref
 			ContinuationToken: token,
 		})
 		if err != nil {
+			if isS3ListNotFound(err) {
+				s.Log().WithField("prefix", prefix).Debug("fastdl: remote prefix empty or not found, skipping stale object cleanup")
+				return keys, nil
+			}
 			return nil, errors.WrapIf(err, "fastdl: failed to list remote objects")
 		}
 
@@ -164,4 +181,23 @@ func (s *Server) listS3Keys(ctx context.Context, client *s3.Client, bucket, pref
 	}
 
 	return keys, nil
+}
+
+// isS3ListNotFound reports whether a ListObjects error indicates an empty or missing prefix.
+// Cloudflare R2 may return NoSuchKey (404) when listing a prefix that does not exist yet.
+func isS3ListNotFound(err error) bool {
+	var apiErr smithy.APIError
+	if stderrors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NoSuchKey", "NotFound", "NoSuchBucket":
+			return true
+		}
+	}
+
+	var respErr *smithyhttp.ResponseError
+	if stderrors.As(err, &respErr) {
+		return respErr.HTTPStatusCode() == 404
+	}
+
+	return false
 }
