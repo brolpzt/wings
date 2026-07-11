@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
@@ -328,8 +330,13 @@ func (e *Environment) Readlog(lines int) ([]string, error) {
 	}
 	defer r.Close()
 
+	var buf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&buf, &buf, r); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
 	var out []string
-	scanner := bufio.NewScanner(r)
+	scanner := bufio.NewScanner(&buf)
 	for scanner.Scan() {
 		out = append(out, scanner.Text())
 	}

@@ -11,8 +11,8 @@ import (
 
 const (
 	statusCommand    = "status"
-	waitAfterCommand = 450 * time.Millisecond
-	logTailLines     = 120
+	waitAfterCommand = 800 * time.Millisecond
+	logTailLines     = 200
 )
 
 // Player represents a connected player parsed from the GoldSrc `status` output.
@@ -73,9 +73,13 @@ func Fetch(ctx context.Context, env Environment) (*Result, error) {
 }
 
 var (
-	classicPlayerLine = regexp.MustCompile(`^#\s+(\d+)\s+"([^"]*)"\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+([\d.]+:\d+))?`)
-	quotedSteamLine   = regexp.MustCompile(`^#\s+(\d+)\s+"([^"]*)"\s+"([^"]*)"\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+([\d.]+:\d+))?`)
-	unquotedNameLine  = regexp.MustCompile(`^#\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+([\d.]+:\d+))?`)
+	rehldsPlayerLine = regexp.MustCompile(`^#\s*(\d+)\s+"([^"]*)"\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)(?:\s+([\d.]+:\d+))?`)
+	classicPlayerLine = regexp.MustCompile(`^#\s*(\d+)\s+"([^"]*)"\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+([\d.]+:\d+))?`)
+	quotedSteamLine   = regexp.MustCompile(`^#\s*(\d+)\s+"([^"]*)"\s+"([^"]*)"\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+([\d.]+:\d+))?`)
+	unquotedNameLine  = regexp.MustCompile(`^#\s*(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+([\d.]+:\d+))?`)
+	connectionTime    = regexp.MustCompile(`\s\d{1,2}:\d{2}(?::\d{2})?\s`)
+	statusHeaderLine  = regexp.MustCompile(`(?i)name.*userid.*uniqueid`)
+	usersFooterLine   = regexp.MustCompile(`^\d+\s+users?$`)
 )
 
 func parseStatusOutput(lines []string) *Result {
@@ -85,12 +89,15 @@ func parseStatusOutput(lines []string) *Result {
 		Source:    "console_status",
 	}
 
+	cleaned := make([]string, 0, len(lines))
 	for _, raw := range lines {
 		line := cleanDockerLogLine(raw)
-		if line == "" {
-			continue
+		if line != "" {
+			cleaned = append(cleaned, line)
 		}
+	}
 
+	for _, line := range cleaned {
 		if result.Hostname == nil {
 			if hostname := parseHostname(line); hostname != "" {
 				result.Hostname = &hostname
@@ -102,13 +109,50 @@ func parseStatusOutput(lines []string) *Result {
 				result.Map = &mapName
 			}
 		}
+	}
+
+	start := findStatusBlockStart(cleaned)
+	if start >= 0 {
+		parsePlayerLines(result, cleaned[start:])
+		return result
+	}
+
+	parsePlayerLines(result, cleaned)
+	return result
+}
+
+func parsePlayerLines(result *Result, lines []string) {
+	parsingPlayers := false
+
+	for _, line := range lines {
+		if statusHeaderLine.MatchString(line) {
+			parsingPlayers = true
+			continue
+		}
+
+		if !parsingPlayers && !strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if usersFooterLine.MatchString(strings.TrimSpace(line)) {
+			break
+		}
 
 		if player, ok := parsePlayerLine(line); ok {
+			parsingPlayers = true
 			result.Players = append(result.Players, player)
 		}
 	}
+}
 
-	return result
+func findStatusBlockStart(lines []string) int {
+	lastHeader := -1
+	for i, line := range lines {
+		if statusHeaderLine.MatchString(line) {
+			lastHeader = i
+		}
+	}
+	return lastHeader
 }
 
 func cleanDockerLogLine(line string) string {
@@ -116,20 +160,20 @@ func cleanDockerLogLine(line string) string {
 		line = line[8:]
 	}
 
-	if idx := strings.Index(line, "#"); idx > 0 {
-		prefix := line[:idx]
-		if strings.TrimFunc(prefix, func(r rune) bool { return r < 32 || r == 127 }) == "" {
-			line = line[idx:]
-		}
-	}
-
-	for _, marker := range []string{"hostname:", "version :", "map     :", "players :"} {
+	for _, marker := range []string{"hostname:", "version :", "map     :", "players :", "# "} {
 		if idx := strings.Index(line, marker); idx > 0 {
 			prefix := line[:idx]
 			if strings.TrimFunc(prefix, func(r rune) bool { return r < 32 || r == 127 }) == "" {
 				line = line[idx:]
 				break
 			}
+		}
+	}
+
+	if idx := strings.Index(line, "#"); idx > 0 {
+		prefix := line[:idx]
+		if strings.TrimFunc(prefix, func(r rune) bool { return r < 32 || r == 127 }) == "" {
+			line = line[idx:]
 		}
 	}
 
@@ -171,12 +215,18 @@ func parsePlayerLine(line string) (Player, bool) {
 		return Player{}, false
 	}
 
-	if strings.Contains(line, "userid") || strings.Contains(line, "name userid") {
+	if statusHeaderLine.MatchString(line) {
 		return Player{}, false
 	}
 
 	if matches := quotedSteamLine.FindStringSubmatch(line); len(matches) > 0 {
 		return buildPlayer(matches[1], matches[2], matches[1], matches[3], "0", matches[5], matches[6], matches[7], matches[8]), true
+	}
+
+	if connectionTime.MatchString(line) {
+		if matches := rehldsPlayerLine.FindStringSubmatch(line); len(matches) > 0 {
+			return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[7], matches[8], "active", matches[9]), true
+		}
 	}
 
 	if matches := classicPlayerLine.FindStringSubmatch(line); len(matches) > 0 {
