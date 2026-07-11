@@ -13,6 +13,8 @@ const (
 	statusCommand    = "status"
 	waitAfterCommand = 800 * time.Millisecond
 	logTailLines     = 200
+	fetchTimeout     = 6 * time.Second
+	readLogTimeout   = 5 * time.Second
 )
 
 // Player represents a connected player parsed from the GoldSrc `status` output.
@@ -46,6 +48,9 @@ type Environment interface {
 
 // Fetch sends `status` to the server console and parses the latest log lines.
 func Fetch(ctx context.Context, env Environment) (*Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+
 	running, err := env.IsRunning(ctx)
 	if err != nil {
 		return nil, err
@@ -64,12 +69,36 @@ func Fetch(ctx context.Context, env Environment) (*Result, error) {
 	case <-time.After(waitAfterCommand):
 	}
 
-	raw, err := env.Readlog(logTailLines)
+	raw, err := readLogsWithTimeout(ctx, env, logTailLines)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read server logs")
+		return nil, err
 	}
 
 	return parseStatusOutput(raw), nil
+}
+
+func readLogsWithTimeout(ctx context.Context, env Environment, lines int) ([]string, error) {
+	type logResult struct {
+		lines []string
+		err   error
+	}
+
+	ch := make(chan logResult, 1)
+	go func() {
+		out, err := env.Readlog(lines)
+		ch <- logResult{lines: out, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, errors.Wrap(ctx.Err(), "timed out reading server logs")
+	case result := <-ch:
+		if result.err != nil {
+			return nil, errors.Wrap(result.err, "failed to read server logs")
+		}
+
+		return result.lines, nil
+	}
 }
 
 var (

@@ -27,6 +27,8 @@ import (
 
 var ErrNotAttached = errors.Sentinel("not attached to instance")
 
+const readLogTimeout = 5 * time.Second
+
 // A custom console writer that allows us to keep a function blocked until the
 // given stream is properly closed. This does nothing special, only exists to
 // make a noop io.Writer.
@@ -320,7 +322,14 @@ func (e *Environment) SendCommand(c string) error {
 // is running or not, it will simply try to read the last X bytes of the file
 // and return them.
 func (e *Environment) Readlog(lines int) ([]string, error) {
-	r, err := e.client.ContainerLogs(context.Background(), e.Id, container.LogsOptions{
+	return e.readContainerLogs(lines, true)
+}
+
+func (e *Environment) readContainerLogs(lines int, demux bool) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readLogTimeout)
+	defer cancel()
+
+	r, err := e.client.ContainerLogs(ctx, e.Id, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Tail:       strconv.Itoa(lines),
@@ -330,18 +339,26 @@ func (e *Environment) Readlog(lines int) ([]string, error) {
 	}
 	defer r.Close()
 
-	var buf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&buf, &buf, r); err != nil {
-		return nil, errors.WithStack(err)
+	if demux {
+		var buf bytes.Buffer
+		if _, err := stdcopy.StdCopy(&buf, &buf, r); err != nil {
+			return e.readContainerLogs(lines, false)
+		}
+
+		return scanLogLines(&buf), nil
 	}
 
+	return scanLogLines(r), nil
+}
+
+func scanLogLines(r io.Reader) []string {
 	var out []string
-	scanner := bufio.NewScanner(&buf)
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		out = append(out, scanner.Text())
 	}
 
-	return out, nil
+	return out
 }
 
 // Pulls the image from Docker. If there is an error while pulling the image
