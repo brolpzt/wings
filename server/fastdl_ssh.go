@@ -23,36 +23,55 @@ func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest) error
 	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs", "--chmod=ugo+rX", "--perms"}
 
 	if req.SyncPatterns != "" {
-		hasDirRule := false
-		patterns := strings.Split(req.SyncPatterns, ",")
+		includes, excludes := parseFastDlSyncPatternLists(req.SyncPatterns)
 
-		for _, p := range patterns {
-			p = strings.TrimSpace(p)
-			if strings.HasSuffix(p, "/") || strings.HasPrefix(p, "/") {
-				hasDirRule = true
-				break
+		// Only user excludes: rsync copies everything except those (no include filter).
+		if len(includes) == 0 && len(excludes) > 0 {
+			for _, ex := range excludes {
+				ex = strings.TrimSpace(ex)
+				if ex == "" {
+					continue
+				}
+				syncArgs = append(syncArgs, fmt.Sprintf("--exclude=%s", ex))
 			}
-		}
-
-		if !hasDirRule {
-			syncArgs = append(syncArgs, "--include=*/")
-		}
-
-		for _, p := range patterns {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
+		} else if len(includes) > 0 {
+			hasDirRule := false
+			for _, p := range includes {
+				p = strings.TrimSpace(p)
+				if strings.HasSuffix(p, "/") || strings.HasPrefix(p, "/") {
+					hasDirRule = true
+					break
+				}
 			}
 
-			if strings.HasSuffix(p, "/") {
-				syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
-				syncArgs = append(syncArgs, fmt.Sprintf("--include=%s**/", p))
-			} else {
-				syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
+			if !hasDirRule {
+				syncArgs = append(syncArgs, "--include=*/")
 			}
-		}
 
-		syncArgs = append(syncArgs, "--exclude=*")
+			for _, p := range includes {
+				p = strings.TrimSpace(p)
+				if p == "" {
+					continue
+				}
+
+				if strings.HasSuffix(p, "/") {
+					syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
+					syncArgs = append(syncArgs, fmt.Sprintf("--include=%s**/", p))
+				} else {
+					syncArgs = append(syncArgs, fmt.Sprintf("--include=%s", p))
+				}
+			}
+
+			for _, ex := range excludes {
+				ex = strings.TrimSpace(ex)
+				if ex == "" {
+					continue
+				}
+				syncArgs = append(syncArgs, fmt.Sprintf("--exclude=%s", ex))
+			}
+
+			syncArgs = append(syncArgs, "--exclude=*")
+		}
 	}
 
 	var sshArgs string
