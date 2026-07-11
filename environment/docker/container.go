@@ -322,10 +322,6 @@ func (e *Environment) SendCommand(c string) error {
 // is running or not, it will simply try to read the last X bytes of the file
 // and return them.
 func (e *Environment) Readlog(lines int) ([]string, error) {
-	return e.readContainerLogs(lines, true)
-}
-
-func (e *Environment) readContainerLogs(lines int, demux bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), readLogTimeout)
 	defer cancel()
 
@@ -339,16 +335,24 @@ func (e *Environment) readContainerLogs(lines int, demux bool) ([]string, error)
 	}
 	defer r.Close()
 
-	if demux {
+	// Docker may return either a multiplexed stream (header byte 1/2) or plain text
+	// depending on daemon/container configuration. Only demux when required.
+	br := bufio.NewReader(r)
+	first, err := br.Peek(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, errors.WithStack(err)
+	}
+
+	if len(first) > 0 && (first[0] == 1 || first[0] == 2) {
 		var buf bytes.Buffer
-		if _, err := stdcopy.StdCopy(&buf, &buf, r); err != nil {
-			return e.readContainerLogs(lines, false)
+		if _, err := stdcopy.StdCopy(&buf, &buf, br); err != nil {
+			return nil, errors.WithStack(err)
 		}
 
 		return scanLogLines(&buf), nil
 	}
 
-	return scanLogLines(r), nil
+	return scanLogLines(br), nil
 }
 
 func scanLogLines(r io.Reader) []string {
