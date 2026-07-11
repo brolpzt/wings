@@ -25,9 +25,10 @@ type Player struct {
 	SteamId string `json:"steamid"`
 	Score   int    `json:"score"`
 	Ping    int    `json:"ping"`
-	Loss    int    `json:"loss"`
-	State   string `json:"state"`
-	Address string `json:"address,omitempty"`
+	Loss      int    `json:"loss"`
+	State     string `json:"state"`
+	Connected string `json:"connected,omitempty"`
+	Address   string `json:"address,omitempty"`
 }
 
 // Result is returned to the Panel after querying players via console logs.
@@ -249,37 +250,38 @@ func parsePlayerLine(line string) (Player, bool) {
 	}
 
 	if matches := quotedSteamLine.FindStringSubmatch(line); len(matches) > 0 {
-		return buildPlayer(matches[1], matches[2], matches[1], matches[3], "0", matches[5], matches[6], matches[7], matches[8]), true
+		return buildPlayer(matches[1], matches[2], matches[1], matches[3], "0", matches[5], matches[6], matches[7], "", matches[8]), true
 	}
 
 	if connectionTime.MatchString(line) {
 		if matches := rehldsPlayerLine.FindStringSubmatch(line); len(matches) > 0 {
-			return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[7], matches[8], "active", matches[9]), true
+			return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[7], matches[8], "active", matches[6], matches[9]), true
 		}
 	}
 
 	if matches := classicPlayerLine.FindStringSubmatch(line); len(matches) > 0 {
-		return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[6], matches[7], matches[8], matches[9]), true
+		return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[6], matches[7], matches[8], "", matches[9]), true
 	}
 
 	if matches := unquotedNameLine.FindStringSubmatch(line); len(matches) > 0 {
-		return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[6], matches[7], matches[8], matches[9]), true
+		return buildPlayer(matches[1], matches[2], matches[3], matches[4], matches[5], matches[6], matches[7], matches[8], "", matches[9]), true
 	}
 
 	return Player{}, false
 }
 
-func buildPlayer(slot, name, userId, steamId, score, ping, loss, state, address string) Player {
+func buildPlayer(slot, name, userId, steamId, score, ping, loss, state, connected, address string) Player {
 	return Player{
-		Slot:    atoi(slot),
-		Name:    name,
-		UserId:  atoi(userId),
-		SteamId: steamId,
-		Score:   atoi(score),
-		Ping:    atoi(ping),
-		Loss:    atoi(loss),
-		State:   state,
-		Address: address,
+		Slot:      atoi(slot),
+		Name:      name,
+		UserId:    atoi(userId),
+		SteamId:   steamId,
+		Score:     atoi(score),
+		Ping:      atoi(ping),
+		Loss:      atoi(loss),
+		State:     state,
+		Connected: connected,
+		Address:   address,
 	}
 }
 

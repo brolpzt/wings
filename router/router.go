@@ -84,6 +84,7 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
 
 		server.GET("/query", getServerQuery)
 		server.GET("/players", getServerPlayers)
+		server.POST("/console-query", postServerConsoleQuery)
 
 		// Firewall (IP ban) routes
 		server.POST("/firewall", postServerFirewallAdd)

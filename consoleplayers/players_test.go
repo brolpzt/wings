@@ -64,9 +64,17 @@ func TestParseStatusOutput_ReHLDSFormat(t *testing.T) {
 		t.Fatalf("unexpected address: %q", player.Address)
 	}
 
+	if player.Connected != "03:18" {
+		t.Fatalf("unexpected connected time: %q", player.Connected)
+	}
+
 	second := result.Players[1]
 	if second.UserId != 14 || second.Ping != 32 {
 		t.Fatalf("unexpected second player: %#v", second)
+	}
+
+	if second.Connected != "12:01" {
+		t.Fatalf("unexpected second connected time: %q", second.Connected)
 	}
 }
 
