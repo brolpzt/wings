@@ -82,6 +82,8 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
 		server.POST("/addon", postServerAddonExecute)
 		server.POST("/ws/deny", postServerDenyWSTokens)
 
+		server.GET("/query", getServerQuery)
+
 		// Firewall (IP ban) routes
 		server.POST("/firewall", postServerFirewallAdd)
 		server.DELETE("/firewall", deleteServerFirewallRule)
