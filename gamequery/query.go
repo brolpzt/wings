@@ -115,7 +115,7 @@ func queryGjq(ctx context.Context, result *Result, gameType, host string, port, 
 	result.Hostname = stringPtr(info.Name)
 	result.Map = stringPtr(info.Map)
 	result.Game = stringPtr(info.Game)
-	result.Players = info.Players
+	result.Players = normalizePlayerCount(info)
 	result.MaxPlayers = info.MaxPlayers
 	result.PasswordProtected = strings.EqualFold(info.Visibility, "private")
 	result.Version = stringPtr(info.Version)
@@ -224,4 +224,34 @@ func stringPtr(value string) *string {
 	}
 
 	return &value
+}
+
+// normalizePlayerCount prefers the protocol player count, but falls back to the
+// parsed player list. CoD2 and some Quake3-based servers omit the "clients" key
+// in getstatus while still returning player lines.
+func normalizePlayerCount(info *gjq.ServerInfo) int {
+	if info == nil {
+		return 0
+	}
+
+	if info.Players > 0 {
+		return info.Players
+	}
+
+	if len(info.PlayerList) == 0 {
+		return 0
+	}
+
+	count := 0
+	for _, player := range info.PlayerList {
+		if strings.TrimSpace(player.Name) != "" {
+			count++
+		}
+	}
+
+	if count > 0 {
+		return count
+	}
+
+	return len(info.PlayerList)
 }
