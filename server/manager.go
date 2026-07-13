@@ -213,7 +213,9 @@ func (m *Manager) InitServer(data remote.ServerConfigurationResponse) (*Server, 
 
 	envCfg := environment.NewConfiguration(settings, s.GetEnvironmentVariables())
 	meta := docker.Metadata{
-		Image: s.Config().Container.Image,
+		Image:                   s.Config().Container.Image,
+		CommandTransmissionType: s.Config().Egg.CommandTransmissionType,
+		RconProtocol:            s.Config().Egg.RconProtocol,
 	}
 
 	if env, err := docker.New(s.ID(), &meta, envCfg); err != nil {

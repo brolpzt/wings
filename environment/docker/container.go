@@ -22,6 +22,7 @@ import (
 
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
+	"github.com/pterodactyl/wings/rcon"
 	"github.com/pterodactyl/wings/system"
 )
 
@@ -299,23 +300,101 @@ func (e *Environment) Destroy() error {
 // instance. There is no confirmation that this data is sent successfully, only
 // that it gets pushed into the stdin.
 func (e *Environment) SendCommand(c string) error {
+	e.mu.RLock()
+	commandType := e.meta.CommandTransmissionType
+	rconProtocol := e.meta.RconProtocol
+	stopType := e.meta.Stop.Type
+	stopValue := e.meta.Stop.Value
+	e.mu.RUnlock()
+
+	// If the command being processed is the same as the process stop command then we
+	// want to mark the server as entering the stopping state otherwise the process will
+	// stop and Wings will think it has crashed and attempt to restart it.
+	if stopType == "command" && c == stopValue {
+		e.SetState(environment.ProcessStoppingState)
+	}
+
+	if commandType == "rcon" {
+		go func() {
+			addr, password := e.getRconConnectionDetails()
+
+			// Log command prefix in user console
+			e.writeToConsole([]byte(fmt.Sprintf("> %s\n", c)))
+
+			var resp string
+			var err error
+
+			switch rconProtocol {
+			case "source":
+				resp, err = rcon.SendSourceCommand(addr, password, c)
+			case "quake3":
+				resp, err = rcon.SendQuake3Command(addr, password, c)
+			case "webrcon":
+				resp, err = rcon.SendWebRconCommand(addr, password, c)
+			default:
+				err = fmt.Errorf("unsupported RCON protocol: %s", rconProtocol)
+			}
+
+			if err != nil {
+				e.writeToConsole([]byte(fmt.Sprintf("[Wings RCON Error]: %v\n", err)))
+			} else if resp != "" {
+				e.writeToConsole([]byte(resp + "\n"))
+			}
+		}()
+		return nil
+	}
+
 	if !e.IsAttached() {
 		return errors.Wrap(ErrNotAttached, "environment/docker: cannot send command to container")
 	}
 
 	e.mu.RLock()
-	defer e.mu.RUnlock()
+	stream := e.stream
+	e.mu.RUnlock()
 
-	// If the command being processed is the same as the process stop command then we
-	// want to mark the server as entering the stopping state otherwise the process will
-	// stop and Wings will think it has crashed and attempt to restart it.
-	if e.meta.Stop.Type == "command" && c == e.meta.Stop.Value {
-		e.SetState(environment.ProcessStoppingState)
+	if stream == nil || stream.Conn == nil {
+		return errors.Wrap(ErrNotAttached, "environment/docker: connection stream is nil")
 	}
 
-	_, err := e.stream.Conn.Write([]byte(c + "\n"))
-
+	_, err := stream.Conn.Write([]byte(c + "\n"))
 	return errors.Wrap(err, "environment/docker: could not write to container stream")
+}
+
+func (e *Environment) writeToConsole(data []byte) {
+	e.logCallbackMx.Lock()
+	defer e.logCallbackMx.Unlock()
+	if e.logCallback != nil {
+		e.logCallback(data)
+	}
+}
+
+func (e *Environment) getRconConnectionDetails() (string, string) {
+	port := ""
+	password := ""
+
+	for _, env := range e.Configuration.EnvironmentVariables() {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) == 2 {
+			key := strings.ToUpper(parts[0])
+			if key == "RCON_PORT" {
+				port = parts[1]
+			} else if key == "RCON_PASSWORD" || key == "RCON_PASS" {
+				password = parts[1]
+			}
+		}
+	}
+
+	if port == "" {
+		port = strconv.Itoa(e.Configuration.Allocations().DefaultMapping.Port)
+	}
+
+	ip := e.Configuration.Allocations().DefaultMapping.Ip
+	if ip == "0.0.0.0" || ip == "" {
+		ip = "127.0.0.1"
+	}
+
+	addr := fmt.Sprintf("%s:%s", ip, port)
+	return addr, password
 }
 
 // Readlog reads the log file for the server. This does not care if the server

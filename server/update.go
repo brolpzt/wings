@@ -34,9 +34,11 @@ func (s *Server) SyncWithEnvironment() {
 	// For Docker specific environments we also want to update the configured image
 	// and stop configuration.
 	if e, ok := s.Environment.(*docker.Environment); ok {
-		s.Log().Debug("syncing stop configuration with configured docker environment")
+		s.Log().Debug("syncing stop and rcon configuration with configured docker environment")
 		e.SetImage(cfg.Container.Image)
 		e.SetStopConfiguration(s.ProcessConfiguration().Stop)
+		e.SetCommandTransmissionType(cfg.Egg.CommandTransmissionType)
+		e.SetRconProtocol(cfg.Egg.RconProtocol)
 	}
 
 	// If build limits are changed, environment variables also change. Plus, any modifications to

@@ -18,8 +18,10 @@ import (
 )
 
 type Metadata struct {
-	Image string
-	Stop  remote.ProcessStopConfiguration
+	Image                   string
+	Stop                    remote.ProcessStopConfiguration
+	CommandTransmissionType string
+	RconProtocol            string
 }
 
 // Ensure that the Docker environment is always implementing all the methods
@@ -187,6 +189,20 @@ func (e *Environment) SetImage(i string) {
 	defer e.mu.Unlock()
 
 	e.meta.Image = i
+}
+
+func (e *Environment) SetCommandTransmissionType(t string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.meta.CommandTransmissionType = t
+}
+
+func (e *Environment) SetRconProtocol(p string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.meta.RconProtocol = p
 }
 
 func (e *Environment) State() string {

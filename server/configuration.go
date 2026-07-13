@@ -14,6 +14,9 @@ type EggConfiguration struct {
 	// or basically any type of access on the server by any user. This is NOT the same
 	// as a per-user denylist, this is defined at the Egg level.
 	FileDenylist []string `json:"file_denylist"`
+
+	CommandTransmissionType string `json:"command_transmission_type"`
+	RconProtocol            string `json:"rcon_protocol"`
 }
 
 type ConfigurationMeta struct {
