@@ -63,6 +63,7 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
 	protected := router.Use(middleware.RequireAuthorization())
 	protected.POST("/api/update", postUpdateConfiguration)
 	protected.GET("/api/system", getSystemInformation)
+	protected.PUT("/api/system/nftables", putSystemNftables)
 	protected.GET("/api/servers", getAllServers)
 	protected.POST("/api/servers", postCreateServer)
 	protected.DELETE("/api/transfers/:server", deleteTransfer)
