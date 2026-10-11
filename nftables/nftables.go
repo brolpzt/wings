@@ -41,7 +41,8 @@ func Sync(rules []Rule) error {
 	}
 
 	for _, rule := range normalized {
-		comment := fmt.Sprintf("ptero:%s:%d:%s", rule.IP, rule.Port, rule.Proto)
+		// nft comment strings reject unquoted ":"; use underscores (still unique per rule).
+		comment := fmt.Sprintf("ptero_%s_%d_%s", rule.IP, rule.Port, rule.Proto)
 		args := []string{
 			"add", "rule", tableFamily, tableName, chainName,
 			"ip", "daddr", rule.IP,
