@@ -60,7 +60,7 @@ func deleteServerFirewallRule(c *gin.Context) {
 func deleteServerFirewallFlush(c *gin.Context) {
 	s := ExtractServer(c)
 
-	// This is best-effort — we don't fail the request if iptables cleanup has issues.
+	// This is best-effort - we don't fail the request if iptables cleanup has issues.
 	s.FlushFirewallRules()
 
 	c.Status(http.StatusNoContent)

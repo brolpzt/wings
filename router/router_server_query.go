@@ -2,8 +2,10 @@ package router
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -32,11 +34,8 @@ func getServerQuery(c *gin.Context) {
 	// container bridge IP so local UDP queries reach the game process.
 	host := resolveQueryHost(c.Request.Context(), s, alloc.Ip)
 	// EOS (Evrima / Dragonwilds) matchmaking indexes sessions by the public IP
-	// advertised as ADDRESS_s — never the Docker bridge address.
-	publicHost := alloc.Ip
-	if publicHost == "" || publicHost == "0.0.0.0" {
-		publicHost = host
-	}
+	// advertised as ADDRESS_s — never the Docker bridge or private bind address.
+	publicHost := resolvePublicQueryHost(c.Query("public_host"), alloc.Alias, alloc.Ip, host)
 	port := alloc.Port
 
 	queryPort := port
@@ -64,6 +63,37 @@ func getServerQuery(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// resolvePublicQueryHost picks the IP EOS (and similar) advertise as ADDRESS_s.
+// Prefer an explicit public_host / allocation alias over private bind or bridge IPs.
+func resolvePublicQueryHost(queryParam, alias, allocationIP, localHost string) string {
+	for _, candidate := range []string{queryParam, alias, allocationIP} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == "0.0.0.0" {
+			continue
+		}
+		if isNonPublicQueryHost(candidate) {
+			continue
+		}
+		return candidate
+	}
+
+	localHost = strings.TrimSpace(localHost)
+	if localHost != "" && !isNonPublicQueryHost(localHost) {
+		return localHost
+	}
+
+	return strings.TrimSpace(allocationIP)
+}
+
+func isNonPublicQueryHost(host string) bool {
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		// Hostnames are treated as public-facing identifiers.
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
 func resolveQueryHost(ctx context.Context, s *server.Server, allocationIP string) string {

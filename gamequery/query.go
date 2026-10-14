@@ -73,12 +73,18 @@ func Query(ctx context.Context, req Request) (*Result, error) {
 		queryPort = port
 	}
 
+	// Prefer public host in the response for EOS games (alias / GCore IP).
+	displayHost := strings.TrimSpace(req.PublicHost)
+	if displayHost == "" {
+		displayHost = host
+	}
+
 	result := &Result{
 		Online:     false,
 		Type:       req.GameType,
-		Address:    host,
+		Address:    displayHost,
 		Port:       port,
-		QueryPort:    queryPort,
+		QueryPort:  queryPort,
 		PlayerList: []Player{},
 		QueriedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
@@ -88,10 +94,7 @@ func Query(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	// EOS matchmaking is keyed by the public ADDRESS_s, not the container bridge IP.
-	eosHost := strings.TrimSpace(req.PublicHost)
-	if eosHost == "" {
-		eosHost = host
-	}
+	eosHost := displayHost
 
 	if isTieGame(gameType) {
 		// Evrima matchmaking is keyed by game port (ADDRESSBOUND), not Source query port.
@@ -101,6 +104,9 @@ func Query(ctx context.Context, req Request) (*Result, error) {
 	if isDragonwildsGame(gameType) {
 		return queryDragonwilds(ctx, result, eosHost, port)
 	}
+
+	// UDP/TCP query responses should keep the local query host for diagnostics.
+	result.Address = host
 
 	return queryGjq(ctx, result, gameType, host, port, queryPort)
 }

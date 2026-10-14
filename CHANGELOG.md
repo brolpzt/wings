@@ -172,7 +172,7 @@
 * Adds a configuration option to control the Docker username space setting when Wings creates containers.
 
 ### Changed
-* Releases are now built using `Go 1.18` — the minimum version required to build Wings is now `Go 1.18`.
+* Releases are now built using `Go 1.18` - the minimum version required to build Wings is now `Go 1.18`.
 
 ## v1.7.1
 ### Fixed
@@ -207,10 +207,10 @@
 * Requests to the Panel that return a client error (4xx response code) no longer trigger an exponential backoff, they immediately stop the request.
 
 ### Changed
-* CPU limit fields are only set on the Docker container if they have been specified for the server — otherwise they are left empty.
+* CPU limit fields are only set on the Docker container if they have been specified for the server - otherwise they are left empty.
 
 ### Added
-* Added the ability to define the location of the temporary folder used by Wings — defaults to `/tmp/pterodactyl`.
+* Added the ability to define the location of the temporary folder used by Wings - defaults to `/tmp/pterodactyl`.
 * Adds the ability to authenticate for SFTP using public keys (requires `Panel@1.8.0`).
 
 ## v1.6.1
@@ -296,13 +296,13 @@
 * Exposes `8080` in the default Docker setup to better support proxy tools.
 
 ### Changed
-* Releases are now built using `Go 1.17` — the minimum version required to build Wings remains `Go 1.16`.
+* Releases are now built using `Go 1.17` - the minimum version required to build Wings remains `Go 1.16`.
 * Simplifed the logic powering server updates to only pull information from the Panel rather than trying to accept updated values. All parts of Wings needing the most up-to-date server details should call `Server#Sync()` to fetch the latest stored build information.
 * `Installer#New()` no longer requires passing all of the server data as a byte slice, rather a new `Installer#ServerDetails` struct is exposed which can be passed and accepts a UUID and if the server should be started after the installer finishes.
 
 ### Removed
 * Removes complicated (and unused) logic during the server installation process that was a hold-over from legacy Wings architectures.
-* Removes the `PATCH /api/servers/:server` endpoint — if you were previously using this API call it should be replaced with `POST /api/servers/:server/sync`.
+* Removes the `PATCH /api/servers/:server` endpoint - if you were previously using this API call it should be replaced with `POST /api/servers/:server/sync`.
 
 ## v1.4.7
 ### Fixed

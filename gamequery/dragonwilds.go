@@ -55,6 +55,11 @@ func queryDragonwilds(ctx context.Context, result *Result, host string, port int
 
 	attrs := session.Attributes
 	result.Online = true
+	if addr := tieAttrString(attrs, "ADDRESS_s"); addr != "" {
+		result.Address = addr
+	} else if host != "" {
+		result.Address = host
+	}
 	// VN_s = server name, XS_s = world/slot name (what players search in-game).
 	hostname := tieAttrString(attrs, "VN_s")
 	if hostname == "" {
