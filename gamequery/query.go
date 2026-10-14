@@ -15,10 +15,14 @@ const defaultTimeout = 5 * time.Second
 
 // Request contains the parameters needed to query a game server.
 type Request struct {
-	GameType  string
-	Host      string
-	Port      int
-	QueryPort int
+	GameType string
+	// Host is used for local UDP/TCP queries (often the Docker bridge IP).
+	Host string
+	// PublicHost is the allocation / public IP used for EOS session matching
+	// (ADDRESS_s). When empty, Host is used.
+	PublicHost string
+	Port       int
+	QueryPort  int
 }
 
 // Player represents an online player entry.
@@ -81,6 +85,21 @@ func Query(ctx context.Context, req Request) (*Result, error) {
 
 	if isSampGame(gameType) {
 		return querySamp(ctx, result, host, queryPort)
+	}
+
+	// EOS matchmaking is keyed by the public ADDRESS_s, not the container bridge IP.
+	eosHost := strings.TrimSpace(req.PublicHost)
+	if eosHost == "" {
+		eosHost = host
+	}
+
+	if isTieGame(gameType) {
+		// Evrima matchmaking is keyed by game port (ADDRESSBOUND), not Source query port.
+		return queryTie(ctx, result, eosHost, port)
+	}
+
+	if isDragonwildsGame(gameType) {
+		return queryDragonwilds(ctx, result, eosHost, port)
 	}
 
 	return queryGjq(ctx, result, gameType, host, port, queryPort)

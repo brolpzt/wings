@@ -1,7 +1,9 @@
 package gamequery
 
 // gameTypeOverrides maps legacy GameQ / GameDig identifiers to gjq registry IDs.
+// Note: "tie" / Evrima is handled separately (EOS) and must NOT map to the-isle (Source).
 var gameTypeOverrides = map[string]string{
+	"cs16":            "counter-strike",
 	"counterstrike16": "counter-strike",
 	"cstrike":         "counter-strike",
 	"goldsource":      "counter-strike",
@@ -29,5 +31,6 @@ var gameTypeOverrides = map[string]string{
 // protocolFallbacks handles games that are not in the gjq registry but share a known protocol.
 var protocolFallbacks = map[string]string{
 	"cod":   "quake3",
+	"cod2":  "quake3",
 	"mohaa": "quake3",
 }
