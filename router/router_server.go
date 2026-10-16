@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"emperror.dev/errors"
 	"github.com/apex/log"
@@ -119,15 +120,37 @@ func postServerCommands(c *gin.Context) {
 	}
 
 	var data struct {
-		Commands []string `json:"commands"`
+		Commands     []string `json:"commands"`
+		Silent       bool     `json:"silent"`
+		Transmission string   `json:"transmission"` // "stdin" forces container stdin (ignores egg RCON)
 	}
 	// BindJSON sends 400 if the request fails, all we need to do is return
 	if err := c.BindJSON(&data); err != nil {
 		return
 	}
 
+	forceStdin := strings.EqualFold(data.Transmission, "stdin")
+
 	for _, command := range data.Commands {
-		if err := s.Environment.SendCommand(command); err != nil {
+		var err error
+		if forceStdin {
+			if stdinEnv, ok := s.Environment.(interface {
+				SendStdinCommand(string, bool) error
+			}); ok {
+				err = stdinEnv.SendStdinCommand(command, data.Silent)
+			} else {
+				err = s.Environment.SendCommand(command)
+			}
+		} else if data.Silent {
+			if silentEnv, ok := s.Environment.(interface{ SendSilentCommand(string) error }); ok {
+				err = silentEnv.SendSilentCommand(command)
+			} else {
+				err = s.Environment.SendCommand(command)
+			}
+		} else {
+			err = s.Environment.SendCommand(command)
+		}
+		if err != nil {
 			s.Log().WithFields(log.Fields{"command": command, "error": err}).Warn("failed to send command to server instance")
 		}
 	}

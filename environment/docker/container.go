@@ -305,10 +305,39 @@ func (e *Environment) Destroy() error {
 	return err
 }
 
+// SendCommandOptions controls how a console command is delivered.
+type SendCommandOptions struct {
+	// Silent skips writing RCON command/response to the user-facing console.
+	Silent bool
+	// ForceStdin always writes to the container stdin, ignoring egg RCON settings.
+	// Used for panel-enforced commands so clients cannot disable delivery by turning RCON off.
+	ForceStdin bool
+}
+
 // SendCommand sends the specified command to the stdin of the running container
 // instance. There is no confirmation that this data is sent successfully, only
 // that it gets pushed into the stdin.
 func (e *Environment) SendCommand(c string) error {
+	return e.sendCommand(c, SendCommandOptions{})
+}
+
+// SendSilentCommand sends a command without writing the command or RCON response
+// to the user-facing console. Useful for panel-enforced settings (e.g. tickrate).
+func (e *Environment) SendSilentCommand(c string) error {
+	return e.sendCommand(c, SendCommandOptions{Silent: true})
+}
+
+// SendCommandWithOptions sends a command using the provided delivery options.
+func (e *Environment) SendCommandWithOptions(c string, opts SendCommandOptions) error {
+	return e.sendCommand(c, opts)
+}
+
+// SendStdinCommand always writes to container stdin, ignoring egg RCON settings.
+func (e *Environment) SendStdinCommand(c string, silent bool) error {
+	return e.sendCommand(c, SendCommandOptions{Silent: silent, ForceStdin: true})
+}
+
+func (e *Environment) sendCommand(c string, opts SendCommandOptions) error {
 	e.mu.RLock()
 	commandType := e.meta.CommandTransmissionType
 	rconProtocol := e.meta.RconProtocol
@@ -323,12 +352,15 @@ func (e *Environment) SendCommand(c string) error {
 		e.SetState(environment.ProcessStoppingState)
 	}
 
-	if commandType == "rcon" {
+	useRcon := !opts.ForceStdin && commandType == "rcon"
+
+	if useRcon {
 		go func() {
 			addr, password := e.getRconConnectionDetails()
 
-			// Log command prefix in user console
-			e.writeToConsole([]byte(fmt.Sprintf("> %s\n", c)))
+			if !opts.Silent {
+				e.writeToConsole([]byte(fmt.Sprintf("> %s\n", c)))
+			}
 
 			var resp string
 			var err error
@@ -342,6 +374,10 @@ func (e *Environment) SendCommand(c string) error {
 				resp, err = rcon.SendWebRconCommand(addr, password, c)
 			default:
 				err = fmt.Errorf("unsupported RCON protocol: %s", rconProtocol)
+			}
+
+			if opts.Silent {
+				return
 			}
 
 			if err != nil {
