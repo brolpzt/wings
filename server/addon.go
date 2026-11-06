@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"emperror.dev/errors"
+
 	"github.com/pterodactyl/wings/remote"
 )
 
@@ -11,6 +13,8 @@ type AddonExecuteRequest struct {
 	Script         string `json:"script"`
 	ContainerImage string `json:"container_image"`
 	Entrypoint     string `json:"entrypoint"`
+	// StartOnCompletion starts the server once the script finishes successfully.
+	StartOnCompletion bool `json:"start_on_completion"`
 }
 
 // ExecuteAddon executes a custom installation script (addon) for the server.
@@ -32,6 +36,14 @@ func (s *Server) ExecuteAddon(ctx context.Context, req AddonExecuteRequest) erro
 	}
 
 	s.Log().Info("completed addon execution process for server")
+
+	if req.StartOnCompletion {
+		s.Log().Info("starting server after successful addon execution")
+		if err := s.HandlePowerAction(PowerActionStart, 30); err != nil {
+			return errors.WrapIf(err, "addon: failed to start server after execution")
+		}
+	}
+
 	return nil
 }
 
