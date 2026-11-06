@@ -181,6 +181,10 @@ func postServerFastDlSync(c *gin.Context) {
 		return
 	}
 
+	if data.AutoSync != nil {
+		s.ConfigureFastDlWatch(*data.AutoSync, data.SyncPatterns)
+	}
+
 	if s.FastDlSyncRunning() {
 		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "A FastDL synchronization is already running for this server."})
 		return

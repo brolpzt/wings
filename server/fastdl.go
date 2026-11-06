@@ -22,6 +22,9 @@ type FastDlSyncRequest struct {
 	RemotePath   string `json:"remote_path"`
 	SyncPatterns string `json:"sync_patterns"`
 
+	// AutoSync turns automatic synchronization on or off (nil leaves it as is).
+	AutoSync *bool `json:"auto_sync"`
+
 	// S3-compatible fields
 	Bucket                string `json:"bucket"`
 	Endpoint              string `json:"endpoint"`
@@ -50,6 +53,7 @@ func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
 	}
 
 	progress := s.startFastDlProgress(storageType)
+	fingerprint := s.fastDlWatchFingerprint()
 
 	var err error
 	switch storageType {
@@ -64,6 +68,7 @@ func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
 		return err
 	}
 
+	s.fastDlSyncSucceeded(fingerprint)
 	s.Log().Info("FastDL synchronization completed successfully")
 	return nil
 }

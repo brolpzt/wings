@@ -101,6 +101,24 @@ func (c *client) SetInstallationStatus(ctx context.Context, uuid string, data In
 	return nil
 }
 
+// NotifyFastDlChanged tells the Panel that files FastDL uploads changed, so it
+// can start an automatic synchronization. Returns false when automatic
+// synchronization is off for the server and Wings should stop watching it.
+func (c *client) NotifyFastDlChanged(ctx context.Context, uuid string) (bool, error) {
+	resp, err := c.Post(ctx, fmt.Sprintf("/servers/%s/fastdl/changed", uuid), d{})
+	if err != nil {
+		return true, err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		AutoSync *bool `json:"auto_sync"`
+	}
+	if err := resp.BindJSON(&out); err != nil || out.AutoSync == nil {
+		return true, nil
+	}
+	return *out.AutoSync, nil
+}
+
 func (c *client) SetArchiveStatus(ctx context.Context, uuid string, successful bool) error {
 	resp, err := c.Post(ctx, fmt.Sprintf("/servers/%s/archive", uuid), d{"successful": successful})
 	if err != nil {

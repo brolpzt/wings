@@ -34,6 +34,7 @@ type Client interface {
 	SetTransferStatus(ctx context.Context, uuid string, successful bool) error
 	ValidateSftpCredentials(ctx context.Context, request SftpAuthRequest) (SftpAuthResponse, error)
 	SendActivityLogs(ctx context.Context, activity []models.Activity) error
+	NotifyFastDlChanged(ctx context.Context, uuid string) (bool, error)
 	SetCredentials(id, token string)
 }
 
