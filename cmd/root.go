@@ -158,6 +158,8 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		log.WithField("error", err).Warn("failed to remove leftover FastDL reference installs")
 	}
 	server.StartFastDlWatchers(manager.All())
+	// nftables bans do not survive a reboot; re-apply the saved ones.
+	server.RestoreFirewallBans()
 
 	if err := config.WriteToDisk(config.Get()); err != nil {
 		if !errors.Is(err, syscall.EROFS) {
