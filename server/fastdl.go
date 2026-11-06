@@ -49,14 +49,17 @@ func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
 		storageType = "ssh"
 	}
 
+	progress := s.startFastDlProgress(storageType)
+
 	var err error
 	switch storageType {
 	case "s3":
-		err = s.syncFastDlS3(ctx, req)
+		err = s.syncFastDlS3(ctx, req, progress)
 	default:
-		err = s.syncFastDlSSH(ctx, req)
+		err = s.syncFastDlSSH(ctx, req, progress)
 	}
 
+	s.finishFastDlProgress(progress, err)
 	if err != nil {
 		return err
 	}

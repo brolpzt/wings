@@ -22,7 +22,7 @@ import (
 	"github.com/gabriel-vasile/mimetype"
 )
 
-func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error {
+func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progress *fastDlProgress) error {
 	if req.Bucket == "" || req.Endpoint == "" || req.AccessKey == "" || req.SecretKey == "" {
 		return errors.New("fastdl: incomplete S3 configuration")
 	}
@@ -110,7 +110,13 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 		return err
 	}
 
-	if len(files) == 0 {
+	progress.update(func(st *FastDlSyncStatus) {
+		st.MatchedFiles, st.SkippedOriginal, st.Phase = int64(len(files)), int64(skippedOriginal), "comparing"
+	})
+
+	// Nothing matched the patterns at all: likely a pattern mistake, so never wipe the remote copy.
+	// (When everything matched was an original file, the cleanup below still removes stale objects.)
+	if len(files) == 0 && skippedOriginal == 0 {
 		s.Log().Warn("fastdl: no local files matched sync patterns; nothing uploaded and no remote files deleted")
 		return nil
 	}
@@ -137,6 +143,9 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 		WithField("skipped_original_files", skippedOriginal).
 		WithField("to_upload_files", len(pending)).WithField("to_upload_bytes", pendingBytes).
 		Info("fastdl: S3 sync plan ready")
+	progress.update(func(st *FastDlSyncStatus) {
+		st.FilesTotal, st.BytesTotal, st.Phase = int64(len(pending)), pendingBytes, "uploading"
+	})
 
 	// Phase 3: upload with a small worker pool and periodic progress logs.
 	var done, failed, uploadedBytes atomic.Int64
@@ -150,8 +159,10 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 				if err := s.uploadFastDlFile(ctx, client, req.Bucket, f); err != nil {
 					failed.Add(1)
 					s.Log().WithField("key", f.key).WithField("error", err).Error("fastdl: failed to upload file")
+					progress.update(func(st *FastDlSyncStatus) { st.FilesDone++; st.FilesFailed++ })
 				} else {
 					uploadedBytes.Add(f.size)
+					progress.update(func(st *FastDlSyncStatus) { st.FilesDone++; st.BytesDone += f.size })
 				}
 				done.Add(1)
 			}
@@ -195,6 +206,8 @@ feed:
 		return errors.Errorf("fastdl: %d of %d uploads failed; stale object cleanup skipped", n, len(pending))
 	}
 
+	progress.update(func(st *FastDlSyncStatus) { st.Phase = "cleaning" })
+
 	var toDelete []types.ObjectIdentifier
 	for key := range remote {
 		if _, ok := localKeys[key]; ok {
@@ -219,6 +232,8 @@ feed:
 		if err != nil {
 			return errors.WrapIf(err, "fastdl: failed to delete stale objects")
 		}
+		n := int64(len(batch))
+		progress.update(func(st *FastDlSyncStatus) { st.Deleted += n })
 	}
 
 	return nil

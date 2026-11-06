@@ -11,7 +11,7 @@ import (
 	"emperror.dev/errors"
 )
 
-func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest) error {
+func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest, progress *fastDlProgress) error {
 	localPath := s.Filesystem().Path()
 	if !strings.HasSuffix(localPath, "/") {
 		localPath += "/"
@@ -32,6 +32,9 @@ func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest) error
 		syncArgs = append(syncArgs, "--exclude-from="+excludeFile)
 		s.Log().WithField("skipped_original_files", skippedOriginal).Info("fastdl: excluding original install files")
 	}
+	progress.update(func(st *FastDlSyncStatus) {
+		st.SkippedOriginal, st.Phase = int64(skippedOriginal), "uploading"
+	})
 
 	if req.SyncPatterns != "" {
 		includes, excludes := parseFastDlSyncPatternLists(req.SyncPatterns)

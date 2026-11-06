@@ -144,10 +144,13 @@ func (s *Server) saveFastDlManifest(m fastDlManifest) error {
 	return errors.WrapIf(os.Rename(tmp.Name(), path), "fastdl: could not save manifest")
 }
 
-// RemoveFastDlManifest deletes the server's install manifest (server deletion).
+// RemoveFastDlManifest deletes the server's install manifest and last sync
+// result (server deletion).
 func (s *Server) RemoveFastDlManifest() {
-	if err := os.Remove(fastDlManifestPath(s.ID())); err != nil && !os.IsNotExist(err) {
-		s.Log().WithField("error", err).Warn("fastdl: could not remove install manifest")
+	for _, path := range []string{fastDlManifestPath(s.ID()), fastDlStatusPath(s.ID())} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			s.Log().WithField("error", err).WithField("path", path).Warn("fastdl: could not remove file")
+		}
 	}
 }
 

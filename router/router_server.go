@@ -181,6 +181,11 @@ func postServerFastDlSync(c *gin.Context) {
 		return
 	}
 
+	if s.FastDlSyncRunning() {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "A FastDL synchronization is already running for this server."})
+		return
+	}
+
 	go func(s *server.Server, data server.FastDlSyncRequest) {
 		s.Log().Info("received manual trigger for FastDL synchronization")
 		if err := s.SyncFastDL(context.Background(), data); err != nil {
@@ -189,6 +194,11 @@ func postServerFastDlSync(c *gin.Context) {
 	}(s, data)
 
 	c.Status(http.StatusAccepted)
+}
+
+// getServerFastDlSync returns the running FastDL sync progress or the last result.
+func getServerFastDlSync(c *gin.Context) {
+	c.JSON(http.StatusOK, ExtractServer(c).FastDlSyncStatus())
 }
 
 // getServerFastDlManifest returns the server's FastDL install manifest status.

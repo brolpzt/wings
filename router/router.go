@@ -84,6 +84,7 @@ func Configure(m *wserver.Manager, client remote.Client) *gin.Engine {
 		server.POST("/reinstall", postServerReinstall)
 		server.POST("/sync", postServerSync)
 		server.POST("/fastdl/sync", postServerFastDlSync)
+		server.GET("/fastdl/sync", getServerFastDlSync)
 		server.GET("/fastdl/manifest", getServerFastDlManifest)
 		server.POST("/fastdl/manifest", postServerFastDlManifest)
 		server.POST("/addon", postServerAddonExecute)
