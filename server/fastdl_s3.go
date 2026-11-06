@@ -62,6 +62,7 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 	matcher := newFastDlPatternMatcher(req.SyncPatterns)
 	manifest := s.loadFastDlManifest()
 	skippedOriginal := 0
+	serverFiles := 0
 
 	// Phase 1: collect the files that match the sync patterns.
 	var files []fastDlLocalFile
@@ -92,6 +93,7 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 		}
 
 		rel = filepath.ToSlash(rel)
+		serverFiles++
 		if !matcher.shouldSync(rel) {
 			return nil
 		}
@@ -114,9 +116,11 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 		st.MatchedFiles, st.SkippedOriginal, st.Phase = int64(len(files)), int64(skippedOriginal), "comparing"
 	})
 
-	// Nothing matched the patterns at all: likely a pattern mistake, so never wipe the remote copy.
-	// (When everything matched was an original file, the cleanup below still removes stale objects.)
-	if len(files) == 0 && skippedOriginal == 0 {
+	// Nothing matched on an empty or unmapped server (volume missing, no install
+	// manifest): never wipe the remote copy. A server with files and a manifest
+	// whose custom files were all deleted is cleaned below like any other.
+	// (When everything matched was an original file, the cleanup also runs.)
+	if len(files) == 0 && skippedOriginal == 0 && (serverFiles == 0 || manifest == nil) {
 		s.Log().Warn("fastdl: no local files matched sync patterns; nothing uploaded and no remote files deleted")
 		return nil
 	}

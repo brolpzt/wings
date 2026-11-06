@@ -56,6 +56,9 @@ type fastDlWatcher struct {
 	notifiedAt   time.Time
 	limitWarned  bool
 	watchedPaths int
+	// dirs holds the watched directories (only used by the run goroutine), so
+	// removing or moving out a whole folder (e.g. a mod) is noticed.
+	dirs map[string]struct{}
 }
 
 var fastDlWatchers sync.Map // server uuid -> *fastDlWatcher
@@ -172,7 +175,7 @@ func (s *Server) fastDlSyncSucceeded(fp string) {
 
 func (s *Server) startFastDlWatcher(cfg fastDlWatchConfig) {
 	ctx, cancel := context.WithCancel(s.Context())
-	w := &fastDlWatcher{s: s, cancel: cancel, cfg: cfg, matcher: newFastDlPatternMatcher(cfg.Patterns)}
+	w := &fastDlWatcher{s: s, cancel: cancel, cfg: cfg, matcher: newFastDlPatternMatcher(cfg.Patterns), dirs: map[string]struct{}{}}
 	if _, loaded := fastDlWatchers.LoadOrStore(s.ID(), w); loaded {
 		cancel()
 		return
@@ -239,6 +242,9 @@ func (w *fastDlWatcher) addTree(watcher *fsnotify.Watcher, dir string) {
 		if err != nil || !d.IsDir() {
 			return nil
 		}
+		if _, ok := w.dirs[path]; ok {
+			return nil
+		}
 		if err := watcher.Add(path); err != nil {
 			w.mu.Lock()
 			warned := w.limitWarned
@@ -250,6 +256,7 @@ func (w *fastDlWatcher) addTree(watcher *fsnotify.Watcher, dir string) {
 			}
 			return filepath.SkipDir
 		}
+		w.dirs[path] = struct{}{}
 		w.watchedPaths++
 		return nil
 	})
@@ -263,6 +270,20 @@ func (w *fastDlWatcher) handle(watcher *fsnotify.Watcher, root string, ev fsnoti
 		if info, err := os.Lstat(ev.Name); err == nil && info.IsDir() {
 			// New or moved-in directory: watch it and look at what came with it.
 			w.addTree(watcher, ev.Name)
+			w.change()
+			return
+		}
+	}
+	if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
+		if _, ok := w.dirs[ev.Name]; ok {
+			// A folder was deleted or moved away with everything in it.
+			prefix := ev.Name + string(filepath.Separator)
+			for d := range w.dirs {
+				if d == ev.Name || len(d) > len(prefix) && d[:len(prefix)] == prefix {
+					delete(w.dirs, d)
+					w.watchedPaths--
+				}
+			}
 			w.change()
 			return
 		}

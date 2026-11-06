@@ -94,6 +94,34 @@ func TestFastDlWatcherNotifiesOnMatchingFiles(t *testing.T) {
 		t.Fatalf("expected exactly one notification, got %d", n)
 	}
 
+	// Synced; then the whole mod folder is moved away (no per-file events).
+	s.fastDlSyncSucceeded(s.fastDlWatchFingerprint())
+	_ = os.Rename(filepath.Join(data, "zombies"), filepath.Join(root, "zombies-moved"))
+	deadline = time.Now().Add(3 * time.Second)
+	for client.notified.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := client.notified.Load(); n != 2 {
+		t.Fatalf("moving a mod folder away must notify, got %d notifications", n)
+	}
+
+	// Deleting a single file notifies too.
+	s.fastDlSyncSucceeded(s.fastDlWatchFingerprint())
+	_ = os.WriteFile(filepath.Join(data, "main", "custom.pk3"), []byte("x"), 0o644)
+	deadline = time.Now().Add(3 * time.Second)
+	for client.notified.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.fastDlSyncSucceeded(s.fastDlWatchFingerprint())
+	_ = os.Remove(filepath.Join(data, "main", "custom.pk3"))
+	deadline = time.Now().Add(3 * time.Second)
+	for client.notified.Load() < 4 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := client.notified.Load(); n != 4 {
+		t.Fatalf("deleting a file must notify, got %d notifications", n)
+	}
+
 	// Turning it off removes the settings.
 	s.ConfigureFastDlWatch(false, "")
 	if _, err := os.Stat(fastDlWatchPath(s.ID())); !os.IsNotExist(err) {
