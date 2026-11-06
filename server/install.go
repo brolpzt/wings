@@ -44,7 +44,11 @@ func (s *Server) install(reinstall bool) error {
 		// install process being executed.
 		s.Events().Publish(InstallStartedEvent, "")
 
+		snapshot := s.snapshotForFastDlManifest()
 		err = s.internalInstall()
+		if err == nil {
+			s.recordFastDlManifest(snapshot)
+		}
 	} else {
 		s.Log().Info("server configured to skip running installation scripts for this egg, not executing process")
 	}

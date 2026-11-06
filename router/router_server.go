@@ -271,6 +271,7 @@ func deleteServer(c *gin.Context) {
 	s.Events().Publish(server.DeletedEvent, nil)
 
 	s.CleanupForDestroy()
+	s.RemoveFastDlManifest()
 
 	// Remove any pending remote file downloads for the server.
 	for _, dl := range downloader.ByServer(s.ID()) {

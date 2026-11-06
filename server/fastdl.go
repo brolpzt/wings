@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"strings"
+	"sync"
+
+	"emperror.dev/errors"
 )
 
 type FastDlSyncRequest struct {
@@ -28,8 +31,17 @@ type FastDlSyncRequest struct {
 	UsePathStyleEndpoint  bool   `json:"use_path_style_endpoint"`
 }
 
+var fastDlRunning sync.Map
+
 // SyncFastDL synchronizes server files to a remote FastDL target (SSH or S3-compatible).
+// Only one synchronization per server runs at a time.
 func (s *Server) SyncFastDL(ctx context.Context, req FastDlSyncRequest) error {
+	if _, busy := fastDlRunning.LoadOrStore(s.ID(), struct{}{}); busy {
+		s.Log().Warn("FastDL synchronization already running; ignoring new request")
+		return errors.New("fastdl: synchronization already in progress")
+	}
+	defer fastDlRunning.Delete(s.ID())
+
 	s.Log().Info("starting FastDL synchronization")
 
 	storageType := strings.ToLower(strings.TrimSpace(req.StorageType))

@@ -22,6 +22,17 @@ func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest) error
 
 	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs", "--chmod=ugo+rX", "--perms"}
 
+	// Stock game files the install delivered are excluded first (rsync: first matching rule wins).
+	excludeFile, skippedOriginal, err := s.writeFastDlOriginalExcludes(localPath)
+	if err != nil {
+		return err
+	}
+	if excludeFile != "" {
+		defer os.Remove(excludeFile)
+		syncArgs = append(syncArgs, "--exclude-from="+excludeFile)
+		s.Log().WithField("skipped_original_files", skippedOriginal).Info("fastdl: excluding original install files")
+	}
+
 	if req.SyncPatterns != "" {
 		includes, excludes := parseFastDlSyncPatternLists(req.SyncPatterns)
 
@@ -114,4 +125,47 @@ func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest) error
 	}
 
 	return nil
+}
+
+// writeFastDlOriginalExcludes writes an rsync exclude file with the original
+// install files that are still untouched. Returns "" when there is nothing to exclude.
+func (s *Server) writeFastDlOriginalExcludes(localRoot string) (string, int, error) {
+	manifest := s.loadFastDlManifest()
+	if len(manifest) == 0 {
+		return "", 0, nil
+	}
+
+	var b strings.Builder
+	count := 0
+	for rel := range manifest {
+		info, err := os.Lstat(filepath.Join(localRoot, filepath.FromSlash(rel)))
+		if err != nil || !info.Mode().IsRegular() || !manifest.isOriginal(rel, info) {
+			continue
+		}
+		pattern, ok := rsyncLiteralPattern(rel)
+		if !ok {
+			continue
+		}
+		b.WriteString(pattern)
+		b.WriteByte('\n')
+		count++
+	}
+	if count == 0 {
+		return "", 0, nil
+	}
+
+	f, err := os.CreateTemp("", "wings-fastdl-exclude-*")
+	if err != nil {
+		return "", 0, errors.WrapIf(err, "fastdl: could not create exclude file")
+	}
+	if _, err := f.WriteString(b.String()); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", 0, errors.WrapIf(err, "fastdl: could not write exclude file")
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", 0, errors.WrapIf(err, "fastdl: could not write exclude file")
+	}
+	return f.Name(), count, nil
 }

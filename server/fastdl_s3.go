@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"emperror.dev/errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -57,14 +60,29 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 
 	localRoot := s.Filesystem().Path()
 	matcher := newFastDlPatternMatcher(req.SyncPatterns)
-	localFiles := make(map[string]struct{})
+	manifest := s.loadFastDlManifest()
+	skippedOriginal := 0
 
+	// Phase 1: collect the files that match the sync patterns.
+	var files []fastDlLocalFile
+	var totalBytes int64
 	err = filepath.Walk(localRoot, func(filePath string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			s.Log().WithField("path", filePath).WithField("error", walkErr).Warn("fastdl: skipping unreadable path")
+			return nil
 		}
 
 		if info.IsDir() {
+			return nil
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Stat(filePath)
+			if err != nil || !target.Mode().IsRegular() {
+				return nil
+			}
+			info = target
+		} else if !info.Mode().IsRegular() {
 			return nil
 		}
 
@@ -78,52 +96,108 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 			return nil
 		}
 
-		key := prefix + rel
-		localFiles[key] = struct{}{}
-
-		f, err := os.Open(filePath)
-		if err != nil {
-			return errors.WrapIf(err, "fastdl: failed to open local file")
-		}
-		defer f.Close()
-
-		contentType := mime.TypeByExtension(filepath.Ext(filePath))
-		if contentType == "" {
-			if mt, err := mimetype.DetectFile(filePath); err == nil {
-				contentType = mt.String()
-			} else {
-				contentType = "application/octet-stream"
-			}
+		// Stock game files the install delivered: players already have them.
+		if manifest.isOriginal(rel, info) {
+			skippedOriginal++
+			return nil
 		}
 
-		_, err = client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket:      aws.String(req.Bucket),
-			Key:         aws.String(key),
-			Body:        f,
-			ContentType: aws.String(contentType),
-		})
-		if err != nil {
-			return errors.WrapIf(err, "fastdl: failed to upload object")
-		}
-
+		files = append(files, fastDlLocalFile{path: filePath, key: prefix + rel, size: info.Size(), modTime: info.ModTime()})
+		totalBytes += info.Size()
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	remoteKeys, err := s.listS3Keys(ctx, client, req.Bucket, prefix)
+	if len(files) == 0 {
+		s.Log().Warn("fastdl: no local files matched sync patterns; nothing uploaded and no remote files deleted")
+		return nil
+	}
+
+	// Phase 2: index what already exists in the bucket so unchanged files are skipped.
+	remote, err := s.listS3Objects(ctx, client, req.Bucket, prefix)
 	if err != nil {
 		return err
 	}
 
-	if len(localFiles) == 0 {
-		s.Log().Warn("fastdl: no local files matched sync patterns; nothing uploaded")
+	localKeys := make(map[string]struct{}, len(files))
+	var pending []fastDlLocalFile
+	var pendingBytes int64
+	for _, f := range files {
+		localKeys[f.key] = struct{}{}
+		if r, ok := remote[f.key]; ok && r.size == f.size && !r.modTime.Before(f.modTime) {
+			continue
+		}
+		pending = append(pending, f)
+		pendingBytes += f.size
+	}
+
+	s.Log().WithField("matched_files", len(files)).WithField("matched_bytes", totalBytes).
+		WithField("skipped_original_files", skippedOriginal).
+		WithField("to_upload_files", len(pending)).WithField("to_upload_bytes", pendingBytes).
+		Info("fastdl: S3 sync plan ready")
+
+	// Phase 3: upload with a small worker pool and periodic progress logs.
+	var done, failed, uploadedBytes atomic.Int64
+	jobs := make(chan fastDlLocalFile)
+	var wg sync.WaitGroup
+	for i := 0; i < fastDlS3Workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for f := range jobs {
+				if err := s.uploadFastDlFile(ctx, client, req.Bucket, f); err != nil {
+					failed.Add(1)
+					s.Log().WithField("key", f.key).WithField("error", err).Error("fastdl: failed to upload file")
+				} else {
+					uploadedBytes.Add(f.size)
+				}
+				done.Add(1)
+			}
+		}()
+	}
+
+	stopProgress := make(chan struct{})
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				s.Log().WithField("done", done.Load()).WithField("total", len(pending)).
+					WithField("failed", failed.Load()).WithField("bytes", uploadedBytes.Load()).
+					Info("fastdl: S3 upload progress")
+			case <-stopProgress:
+				return
+			}
+		}
+	}()
+
+feed:
+	for _, f := range pending {
+		select {
+		case jobs <- f:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	close(stopProgress)
+
+	if err := ctx.Err(); err != nil {
+		return errors.WrapIf(err, "fastdl: synchronization interrupted")
+	}
+
+	// Never delete remote files when some uploads failed; the next run retries them.
+	if n := failed.Load(); n > 0 {
+		return errors.Errorf("fastdl: %d of %d uploads failed; stale object cleanup skipped", n, len(pending))
 	}
 
 	var toDelete []types.ObjectIdentifier
-	for _, key := range remoteKeys {
-		if _, ok := localFiles[key]; ok {
+	for key := range remote {
+		if _, ok := localKeys[key]; ok {
 			continue
 		}
 		toDelete = append(toDelete, types.ObjectIdentifier{Key: aws.String(key)})
@@ -150,8 +224,51 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest) error 
 	return nil
 }
 
-func (s *Server) listS3Keys(ctx context.Context, client *s3.Client, bucket, prefix string) ([]string, error) {
-	var keys []string
+const fastDlS3Workers = 8
+
+type fastDlLocalFile struct {
+	path    string
+	key     string
+	size    int64
+	modTime time.Time
+}
+
+type fastDlRemoteObject struct {
+	size    int64
+	modTime time.Time
+}
+
+func (s *Server) uploadFastDlFile(ctx context.Context, client *s3.Client, bucket string, f fastDlLocalFile) error {
+	file, err := os.Open(f.path)
+	if err != nil {
+		return errors.WrapIf(err, "fastdl: failed to open local file")
+	}
+	defer file.Close()
+
+	contentType := mime.TypeByExtension(filepath.Ext(f.path))
+	if contentType == "" {
+		if mt, err := mimetype.DetectFile(f.path); err == nil {
+			contentType = mt.String()
+		} else {
+			contentType = "application/octet-stream"
+		}
+	}
+
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(f.key),
+		Body:        file,
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return errors.WrapIf(err, "fastdl: failed to upload object")
+	}
+
+	return nil
+}
+
+func (s *Server) listS3Objects(ctx context.Context, client *s3.Client, bucket, prefix string) (map[string]fastDlRemoteObject, error) {
+	keys := make(map[string]fastDlRemoteObject)
 	var token *string
 
 	for {
@@ -170,7 +287,11 @@ func (s *Server) listS3Keys(ctx context.Context, client *s3.Client, bucket, pref
 
 		for _, obj := range out.Contents {
 			if obj.Key != nil {
-				keys = append(keys, *obj.Key)
+				ro := fastDlRemoteObject{size: aws.ToInt64(obj.Size)}
+				if obj.LastModified != nil {
+					ro.modTime = *obj.LastModified
+				}
+				keys[*obj.Key] = ro
 			}
 		}
 
