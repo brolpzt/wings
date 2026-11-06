@@ -23,7 +23,7 @@ func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest, progr
 	syncArgs := []string{"-avz", "--delete", "--prune-empty-dirs", "--chmod=ugo+rX", "--perms"}
 
 	// Stock game files the install delivered are excluded first (rsync: first matching rule wins).
-	excludeFile, skippedOriginal, err := s.writeFastDlOriginalExcludes(localPath)
+	excludeFile, skippedOriginal, err := s.writeFastDlOriginalExcludes(localPath, newFastDlPatternMatcher(req.SyncPatterns))
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (s *Server) syncFastDlSSH(ctx context.Context, req FastDlSyncRequest, progr
 
 // writeFastDlOriginalExcludes writes an rsync exclude file with the original
 // install files that are still untouched. Returns "" when there is nothing to exclude.
-func (s *Server) writeFastDlOriginalExcludes(localRoot string) (string, int, error) {
+func (s *Server) writeFastDlOriginalExcludes(localRoot string, matcher *fastDlPatternMatcher) (string, int, error) {
 	manifest := s.loadFastDlManifest()
 	if len(manifest) == 0 {
 		return "", 0, nil
@@ -142,7 +142,7 @@ func (s *Server) writeFastDlOriginalExcludes(localRoot string) (string, int, err
 	count := 0
 	for rel := range manifest {
 		info, err := os.Lstat(filepath.Join(localRoot, filepath.FromSlash(rel)))
-		if err != nil || !info.Mode().IsRegular() || !manifest.isOriginal(rel, info) {
+		if err != nil || !info.Mode().IsRegular() || !manifest.isOriginal(rel, info) || matcher.isForced(rel) {
 			continue
 		}
 		pattern, ok := rsyncLiteralPattern(rel)

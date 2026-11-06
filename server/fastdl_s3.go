@@ -97,7 +97,7 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 		}
 
 		// Stock game files the install delivered: players already have them.
-		if manifest.isOriginal(rel, info) {
+		if manifest.isOriginal(rel, info) && !matcher.isForced(rel) {
 			skippedOriginal++
 			return nil
 		}

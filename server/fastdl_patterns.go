@@ -9,14 +9,23 @@ import (
 type fastDlPatternMatcher struct {
 	includes []string
 	excludes []string
+	// forced: "+" rules. Synced even when the install manifest marks the file as
+	// original (mods the egg installs that players still need, e.g. zPAM).
+	forced []string
 }
 
 // parseFastDlSyncPatternLists splits the panel sync_patterns field into includes and excludes.
 // A segment starting with ! (after trim) is an exclude rule; the ! is not part of the glob.
+// A segment starting with + is an include that also overrides the install manifest.
 // Separators: comma, semicolon, newline.
 func parseFastDlSyncPatternLists(syncPatterns string) (includes []string, excludes []string) {
+	includes, excludes, _ = parseFastDlSyncPatterns(syncPatterns)
+	return includes, excludes
+}
+
+func parseFastDlSyncPatterns(syncPatterns string) (includes []string, excludes []string, forced []string) {
 	if syncPatterns == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	for _, part := range strings.FieldsFunc(syncPatterns, func(r rune) bool {
 		return r == ',' || r == ';' || r == '\n' || r == '\r'
@@ -32,14 +41,38 @@ func parseFastDlSyncPatternLists(syncPatterns string) (includes []string, exclud
 			}
 			continue
 		}
+		if strings.HasPrefix(p, "+") {
+			p = strings.TrimSpace(strings.TrimPrefix(p, "+"))
+			if p == "" {
+				continue
+			}
+			forced = append(forced, p)
+		}
 		includes = append(includes, p)
 	}
-	return includes, excludes
+	return includes, excludes, forced
 }
 
 func newFastDlPatternMatcher(syncPatterns string) *fastDlPatternMatcher {
-	inc, exc := parseFastDlSyncPatternLists(syncPatterns)
-	return &fastDlPatternMatcher{includes: inc, excludes: exc}
+	inc, exc, forced := parseFastDlSyncPatterns(syncPatterns)
+	return &fastDlPatternMatcher{includes: inc, excludes: exc, forced: forced}
+}
+
+// isForced reports whether a "+" rule makes relPath sync even if it is original.
+// Exclude rules still win.
+func (m *fastDlPatternMatcher) isForced(relPath string) bool {
+	relPath = filepath.ToSlash(relPath)
+	for _, raw := range m.excludes {
+		if matchFastDlPattern(relPath, raw) {
+			return false
+		}
+	}
+	for _, raw := range m.forced {
+		if matchFastDlPattern(relPath, raw) {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldSync mirrors FastDL filter semantics (aligned with fastdl_ssh.go rsync rules):

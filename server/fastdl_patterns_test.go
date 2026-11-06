@@ -86,3 +86,22 @@ func TestFastDlPatternOnlyExcludes(t *testing.T) {
 		t.Fatal(".bsp should sync when only excludes set")
 	}
 }
+
+func TestFastDlForcedPatterns(t *testing.T) {
+	m := newFastDlPatternMatcher("*.iwd\n*.pk3\n+zpam*.iwd\n!zpam_secret.iwd")
+
+	if !m.shouldSync("main/zpam403.iwd") || !m.isForced("main/zpam403.iwd") {
+		t.Fatal("+zpam*.iwd must sync and override the manifest")
+	}
+	if !m.shouldSync("main/iw_00.iwd") || m.isForced("main/iw_00.iwd") {
+		t.Fatal("plain *.iwd must sync but not override the manifest")
+	}
+	if m.shouldSync("main/zpam_secret.iwd") || m.isForced("main/zpam_secret.iwd") {
+		t.Fatal("excludes win over + rules")
+	}
+
+	inc, exc := parseFastDlSyncPatternLists("+zpam*.iwd, !*.cfg")
+	if len(inc) != 1 || inc[0] != "zpam*.iwd" || len(exc) != 1 {
+		t.Fatalf("rsync lists must get the bare glob: %v %v", inc, exc)
+	}
+}
