@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,5 +94,60 @@ func TestRsyncLiteralPattern(t *testing.T) {
 	}
 	if _, ok := rsyncLiteralPattern("bad\nname"); ok {
 		t.Error("newline names must be rejected")
+	}
+}
+
+func TestCompareWithFastDlReference(t *testing.T) {
+	serverRoot, refDir := t.TempDir(), t.TempDir()
+	write := func(root, rel, content string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(refDir, "cstrike/maps/de_dust2.bsp", "stock-dust2")
+	write(refDir, "cstrike/maps/de_inferno.bsp", "STOCK-infern")
+	write(refDir, "cstrike/sound/a.wav", "stock-sound")
+
+	write(serverRoot, "cstrike/maps/de_dust2.bsp", "stock-dust2")    // untouched stock file
+	write(serverRoot, "cstrike/maps/de_inferno.bsp", "USER-inferno") // replaced by the user, same size
+	write(serverRoot, "cstrike/sound/a.wav", "edited")               // edited, different size
+	write(serverRoot, "cstrike/maps/custom.bsp", "custom")           // user's own map
+
+	m, compared, err := compareWithFastDlReference(context.Background(), serverRoot, refDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compared != 2 {
+		t.Fatalf("compared %d files, want 2 (same path and size)", compared)
+	}
+	if len(m) != 1 {
+		t.Fatalf("manifest %v, want only de_dust2.bsp", m)
+	}
+	info, _ := os.Stat(filepath.Join(serverRoot, "cstrike/maps/de_dust2.bsp"))
+	if !m.isOriginal("cstrike/maps/de_dust2.bsp", info) {
+		t.Fatal("manifest must hold the server file's own size and mtime")
+	}
+}
+
+func TestSameFileContentLargeFiles(t *testing.T) {
+	dir := t.TempDir()
+	big := bytes.Repeat([]byte("x"), 200<<10)
+	a, b, c := filepath.Join(dir, "a"), filepath.Join(dir, "b"), filepath.Join(dir, "c")
+	_ = os.WriteFile(a, big, 0o644)
+	_ = os.WriteFile(b, big, 0o644)
+	changed := append([]byte{}, big...)
+	changed[len(changed)-1] = 'y'
+	_ = os.WriteFile(c, changed, 0o644)
+
+	if same, err := sameFileContent(a, b); err != nil || !same {
+		t.Fatalf("identical files: same=%v err=%v", same, err)
+	}
+	if same, _ := sameFileContent(a, c); same {
+		t.Fatal("files differing in the last byte must not match")
 	}
 }

@@ -154,6 +154,10 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		return
 	}
 
+	if err := server.CleanupFastDlReferences(cmd.Context(), manager.All()); err != nil {
+		log.WithField("error", err).Warn("failed to remove leftover FastDL reference installs")
+	}
+
 	if err := config.WriteToDisk(config.Get()); err != nil {
 		if !errors.Is(err, syscall.EROFS) {
 			log.WithField("error", err).Error("failed to write configuration to disk")

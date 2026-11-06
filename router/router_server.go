@@ -191,6 +191,26 @@ func postServerFastDlSync(c *gin.Context) {
 	c.Status(http.StatusAccepted)
 }
 
+// getServerFastDlManifest returns the server's FastDL install manifest status.
+func getServerFastDlManifest(c *gin.Context) {
+	c.JSON(http.StatusOK, ExtractServer(c).FastDlManifestStatus())
+}
+
+// postServerFastDlManifest queues a reference install that builds the manifest
+// of a server installed before manifests existed.
+func postServerFastDlManifest(c *gin.Context) {
+	s := ExtractServer(c)
+	if s.IsInProtectedState() {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "Server is installing, transferring or restoring."})
+		return
+	}
+	if !s.QueueFastDlReferenceManifest() {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "A manifest generation is already queued or running for this server."})
+		return
+	}
+	c.JSON(http.StatusAccepted, s.FastDlManifestStatus())
+}
+
 // postServerAddonExecute handles a request to execute an addon script (installation).
 func postServerAddonExecute(c *gin.Context) {
 	s := ExtractServer(c)

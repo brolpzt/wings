@@ -122,6 +122,20 @@ type InstallationProcess struct {
 	Server *Server
 	Script *remote.InstallationScript
 	client *client.Client
+
+	// refDir, when set, makes this a FastDL reference install: the script runs
+	// into refDir instead of the server's files, silently, under its own
+	// container name, without touching the running server.
+	refDir   string
+	refCtx   context.Context
+	exitCode int64
+}
+
+func (ip *InstallationProcess) containerName() string {
+	if ip.refDir != "" {
+		return ip.Server.ID() + "_fastdl_ref"
+	}
+	return ip.Server.ID() + "_installer"
 }
 
 // NewInstallationProcess returns a new installation process struct that will be
@@ -183,7 +197,7 @@ func (s *Server) IsInProtectedState() bool {
 
 // RemoveContainer removes the installation container for the server.
 func (ip *InstallationProcess) RemoveContainer() error {
-	err := ip.client.ContainerRemove(ip.Server.Context(), ip.Server.ID()+"_installer", container.RemoveOptions{
+	err := ip.client.ContainerRemove(context.Background(), ip.containerName(), container.RemoveOptions{
 		RemoveVolumes: true,
 		Force:         true,
 	})
@@ -233,6 +247,9 @@ func (ip *InstallationProcess) Run() error {
 
 // Returns the location of the temporary data for the installation process.
 func (ip *InstallationProcess) tempDir() string {
+	if ip.refDir != "" {
+		return filepath.Join(config.Get().System.TmpDirectory, ip.Server.ID()+"_fastdl_ref")
+	}
 	return filepath.Join(config.Get().System.TmpDirectory, ip.Server.ID())
 }
 
@@ -338,6 +355,9 @@ func (ip *InstallationProcess) BeforeExecute() error {
 
 // GetLogPath returns the log path for the installation process.
 func (ip *InstallationProcess) GetLogPath() string {
+	if ip.refDir != "" {
+		return filepath.Join(config.Get().System.LogDirectory, "/install", ip.Server.ID()+"_fastdl_ref.log")
+	}
 	return filepath.Join(config.Get().System.LogDirectory, "/install", ip.Server.ID()+".log")
 }
 
@@ -409,7 +429,11 @@ func (ip *InstallationProcess) Execute() (string, error) {
 	// Create a child context that is canceled once this function is done running. This
 	// will also be canceled if the parent context (from the Server struct) is canceled
 	// which occurs if the server is deleted.
-	ctx, cancel := context.WithCancel(ip.Server.Context())
+	parent := ip.Server.Context()
+	if ip.refCtx != nil {
+		parent = ip.refCtx
+	}
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	conf := &container.Config{
@@ -434,7 +458,7 @@ func (ip *InstallationProcess) Execute() (string, error) {
 		Mounts: []mount.Mount{
 			{
 				Target:   "/mnt/server",
-				Source:   ip.Server.Filesystem().Path(),
+				Source:   ip.serverMountSource(),
 				Type:     mount.TypeBind,
 				ReadOnly: false,
 			},
@@ -459,8 +483,10 @@ func (ip *InstallationProcess) Execute() (string, error) {
 	// to trigger the reinstall of the server. It is possible the directory would
 	// not exist when this runs if Wings boots with a missing directory and a user
 	// triggers a reinstall before trying to start the server.
-	if err := ip.Server.EnsureDataDirectoryExists(); err != nil {
-		return "", err
+	if ip.refDir == "" {
+		if err := ip.Server.EnsureDataDirectoryExists(); err != nil {
+			return "", err
+		}
 	}
 
 	ip.Server.Log().WithField("install_script", ip.tempDir()+"/install.sh").Info("creating install container for server process")
@@ -473,7 +499,7 @@ func (ip *InstallationProcess) Execute() (string, error) {
 		}
 	}()
 
-	r, err := ip.client.ContainerCreate(ctx, conf, hostConf, nil, nil, ip.Server.ID()+"_installer")
+	r, err := ip.client.ContainerCreate(ctx, conf, hostConf, nil, nil, ip.containerName())
 	if err != nil {
 		return "", err
 	}
@@ -491,6 +517,9 @@ func (ip *InstallationProcess) Execute() (string, error) {
 	// If there is an error during the streaming output just report it and do nothing else, the
 	// install can still run, the console just won't have any output.
 	go func(id string) {
+		if ip.refDir != "" {
+			return // reference installs stay out of the server console
+		}
 		ip.Server.Events().Publish(DaemonMessageEvent, "Starting installation process, this could take a few minutes...")
 		if err := ip.StreamOutput(ctx, id); err != nil {
 			ip.Server.Log().WithField("error", err).Warn("error connecting to server install stream output")
@@ -502,14 +531,24 @@ func (ip *InstallationProcess) Execute() (string, error) {
 	case err := <-eChan:
 		// Once the container has stopped running we can mark the install process as being completed.
 		if err == nil {
-			ip.Server.Events().Publish(DaemonMessageEvent, "Installation process completed.")
+			if ip.refDir == "" {
+				ip.Server.Events().Publish(DaemonMessageEvent, "Installation process completed.")
+			}
 		} else {
 			return "", err
 		}
-	case <-sChan:
+	case st := <-sChan:
+		ip.exitCode = st.StatusCode
 	}
 
 	return r.ID, nil
+}
+
+func (ip *InstallationProcess) serverMountSource() string {
+	if ip.refDir != "" {
+		return ip.refDir
+	}
+	return ip.Server.Filesystem().Path()
 }
 
 // StreamOutput streams the output of the installation process to a log file in
