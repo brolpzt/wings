@@ -2,6 +2,7 @@ package gamequery
 
 import (
 	"context"
+	"net"
 	"strings"
 	"time"
 
@@ -107,6 +108,20 @@ func Query(ctx context.Context, req Request) (*Result, error) {
 
 	// UDP/TCP query responses should keep the local query host for diagnostics.
 	result.Address = host
+
+	// GoldSrc servers may answer in Reunion "hybrid" mode (0x6d + 0x49), which
+	// gjq cannot parse. Fall back to gjq if the dedicated client fails.
+	if isGoldsrcGame(gameType) {
+		out, err := queryGoldsrc(ctx, result, host, queryPort)
+		if err == nil {
+			return out, nil
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// No reply at all: the server is offline, gjq would only wait again.
+			return result, nil
+		}
+	}
 
 	return queryGjq(ctx, result, gameType, host, port, queryPort)
 }
