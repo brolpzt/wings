@@ -33,4 +33,8 @@ var protocolFallbacks = map[string]string{
 	"cod":   "quake3",
 	"cod2":  "quake3",
 	"mohaa": "quake3",
+	// Euro Truck Simulator 2 / American Truck Simulator dedicated servers answer
+	// Steam A2S on query_dedicated_port (QUERY_PORT), not on the game port.
+	"ets2": "source",
+	"ats":  "source",
 }
