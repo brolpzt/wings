@@ -14,7 +14,7 @@ import (
 // the result of the last one (kept on disk so it survives Wings restarts).
 type FastDlSyncStatus struct {
 	State           string     `json:"state"`           // never | running | completed | failed
-	Phase           string     `json:"phase,omitempty"` // scanning | comparing | uploading | cleaning
+	Phase           string     `json:"phase,omitempty"` // scanning | comparing | uploading | cleaning | purging
 	StorageType     string     `json:"storage_type,omitempty"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	FinishedAt      *time.Time `json:"finished_at,omitempty"`
@@ -26,6 +26,8 @@ type FastDlSyncStatus struct {
 	BytesTotal      int64      `json:"bytes_total"`
 	BytesDone       int64      `json:"bytes_done"`
 	Deleted         int64      `json:"deleted_files"`
+	Purged          int64      `json:"purged_urls"` // CDN URLs purged (http + https per file)
+	PurgeError      string     `json:"purge_error,omitempty"`
 	Error           string     `json:"error,omitempty"`
 }
 

@@ -32,6 +32,9 @@ type FastDlSyncRequest struct {
 	AccessKey             string `json:"access_key"`
 	SecretKey             string `json:"secret_key"`
 	UsePathStyleEndpoint  bool   `json:"use_path_style_endpoint"`
+
+	// Purge clears the CDN cache of overwritten and deleted files (nil: no purge).
+	Purge *FastDlPurgeConfig `json:"purge"`
 }
 
 var fastDlRunning sync.Map

@@ -104,7 +104,7 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 			return nil
 		}
 
-		files = append(files, fastDlLocalFile{path: filePath, key: prefix + rel, size: info.Size(), modTime: info.ModTime()})
+		files = append(files, fastDlLocalFile{path: filePath, key: prefix + rel, rel: rel, size: info.Size(), modTime: info.ModTime()})
 		totalBytes += info.Size()
 		return nil
 	})
@@ -136,9 +136,12 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 	var pendingBytes int64
 	for _, f := range files {
 		localKeys[f.key] = struct{}{}
-		if r, ok := remote[f.key]; ok && r.size == f.size && !r.modTime.Before(f.modTime) {
+		r, exists := remote[f.key]
+		if exists && r.size == f.size && !r.modTime.Before(f.modTime) {
 			continue
 		}
+		// An overwritten object may still be cached by the CDN with its old content.
+		f.overwrite = exists
 		pending = append(pending, f)
 		pendingBytes += f.size
 	}
@@ -150,6 +153,13 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 	progress.update(func(st *FastDlSyncStatus) {
 		st.FilesTotal, st.BytesTotal, st.Phase = int64(len(pending)), pendingBytes, "uploading"
 	})
+
+	// Overwritten and deleted objects are purged from the CDN cache on the way
+	// out, also when some uploads failed (the ones that succeeded are stale).
+	purge := &fastDlPurgeList{}
+	defer func() {
+		s.purgeFastDlCache(context.WithoutCancel(ctx), req.Purge, purge.list(), progress)
+	}()
 
 	// Phase 3: upload with a small worker pool and periodic progress logs.
 	var done, failed, uploadedBytes atomic.Int64
@@ -166,6 +176,9 @@ func (s *Server) syncFastDlS3(ctx context.Context, req FastDlSyncRequest, progre
 					progress.update(func(st *FastDlSyncStatus) { st.FilesDone++; st.FilesFailed++ })
 				} else {
 					uploadedBytes.Add(f.size)
+					if f.overwrite {
+						purge.add(shortID + "/" + f.rel)
+					}
 					progress.update(func(st *FastDlSyncStatus) { st.FilesDone++; st.BytesDone += f.size })
 				}
 				done.Add(1)
@@ -238,6 +251,9 @@ feed:
 		}
 		n := int64(len(batch))
 		progress.update(func(st *FastDlSyncStatus) { st.Deleted += n })
+		for _, obj := range batch {
+			purge.add(shortID + "/" + strings.TrimPrefix(aws.ToString(obj.Key), prefix))
+		}
 	}
 
 	return nil
@@ -246,10 +262,12 @@ feed:
 const fastDlS3Workers = 8
 
 type fastDlLocalFile struct {
-	path    string
-	key     string
-	size    int64
-	modTime time.Time
+	path      string
+	key       string
+	rel       string // path inside the server, with forward slashes
+	size      int64
+	modTime   time.Time
+	overwrite bool // the object already existed in the bucket
 }
 
 type fastDlRemoteObject struct {
